@@ -20,7 +20,7 @@ impl SimpleComponent for AppModel {
 
     view! {
         adw::ApplicationWindow {
-            set_title: Some("Zenbook Control"),
+            set_title: Some("MyAsus Control Center"),
             set_default_size: (1200, 800),
 
             #[wrap(Some)]
