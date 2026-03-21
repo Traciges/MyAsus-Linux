@@ -84,35 +84,19 @@ impl Component for FanModel {
         let check_standard = gtk::CheckButton::new();
         let check_fluester = gtk::CheckButton::new();
 
-        // Gruppe bilden → Radio-Button-Verhalten
         check_standard.set_group(Some(&check_leistung));
         check_fluester.set_group(Some(&check_leistung));
-
-        // Standard als Default
         check_standard.set_active(true);
 
-        // Signale verbinden
-        {
+        for (btn, profile) in [
+            (&check_leistung, FanProfile::Performance),
+            (&check_standard, FanProfile::Balanced),
+            (&check_fluester, FanProfile::Quiet),
+        ] {
             let sender = sender.clone();
-            check_leistung.connect_toggled(move |btn| {
-                if btn.is_active() {
-                    sender.input(FanMsg::ProfilWechseln(FanProfile::Performance));
-                }
-            });
-        }
-        {
-            let sender = sender.clone();
-            check_standard.connect_toggled(move |btn| {
-                if btn.is_active() {
-                    sender.input(FanMsg::ProfilWechseln(FanProfile::Balanced));
-                }
-            });
-        }
-        {
-            let sender = sender.clone();
-            check_fluester.connect_toggled(move |btn| {
-                if btn.is_active() {
-                    sender.input(FanMsg::ProfilWechseln(FanProfile::Quiet));
+            btn.connect_toggled(move |b| {
+                if b.is_active() {
+                    sender.input(FanMsg::ProfilWechseln(profile));
                 }
             });
         }
@@ -127,7 +111,6 @@ impl Component for FanModel {
 
         let widgets = view_output!();
 
-        // Aktuelles Profil asynchron laden
         sender.command(|out, shutdown| {
             shutdown
                 .register(async move {
@@ -139,7 +122,6 @@ impl Component for FanModel {
                 .drop_on_shutdown()
         });
 
-        // Tiefschlaf-Status lesen (kein Root nötig)
         sender.command(|out, shutdown| {
             shutdown
                 .register(async move {

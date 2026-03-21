@@ -33,13 +33,17 @@ impl From<u32> for FanProfile {
     }
 }
 
-pub async fn get_charge_limit() -> Result<u8, String> {
+async fn platform_proxy() -> Result<PlatformProxy<'static>, String> {
     let conn = zbus::Connection::system()
         .await
         .map_err(|e| format!("D-Bus-Verbindung fehlgeschlagen: {e}"))?;
-    let proxy = PlatformProxy::new(&conn)
+    PlatformProxy::new(&conn)
         .await
-        .map_err(|e| format!("Proxy-Erstellung fehlgeschlagen: {e}"))?;
+        .map_err(|e| format!("Proxy-Erstellung fehlgeschlagen: {e}"))
+}
+
+pub async fn get_charge_limit() -> Result<u8, String> {
+    let proxy = platform_proxy().await?;
     proxy
         .charge_control_end_threshold()
         .await
@@ -47,12 +51,7 @@ pub async fn get_charge_limit() -> Result<u8, String> {
 }
 
 pub async fn set_charge_limit(value: u8) -> Result<u8, String> {
-    let conn = zbus::Connection::system()
-        .await
-        .map_err(|e| format!("D-Bus-Verbindung fehlgeschlagen: {e}"))?;
-    let proxy = PlatformProxy::new(&conn)
-        .await
-        .map_err(|e| format!("Proxy-Erstellung fehlgeschlagen: {e}"))?;
+    let proxy = platform_proxy().await?;
     proxy
         .set_charge_control_end_threshold(value)
         .await
@@ -61,12 +60,7 @@ pub async fn set_charge_limit(value: u8) -> Result<u8, String> {
 }
 
 pub async fn get_fan_profile() -> Result<FanProfile, String> {
-    let conn = zbus::Connection::system()
-        .await
-        .map_err(|e| format!("D-Bus-Verbindung fehlgeschlagen: {e}"))?;
-    let proxy = PlatformProxy::new(&conn)
-        .await
-        .map_err(|e| format!("Proxy-Erstellung fehlgeschlagen: {e}"))?;
+    let proxy = platform_proxy().await?;
     let value = proxy
         .platform_profile()
         .await
@@ -75,12 +69,7 @@ pub async fn get_fan_profile() -> Result<FanProfile, String> {
 }
 
 pub async fn set_fan_profile(profile: FanProfile) -> Result<FanProfile, String> {
-    let conn = zbus::Connection::system()
-        .await
-        .map_err(|e| format!("D-Bus-Verbindung fehlgeschlagen: {e}"))?;
-    let proxy = PlatformProxy::new(&conn)
-        .await
-        .map_err(|e| format!("Proxy-Erstellung fehlgeschlagen: {e}"))?;
+    let proxy = platform_proxy().await?;
     proxy
         .set_platform_profile(profile as u32)
         .await
