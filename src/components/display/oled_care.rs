@@ -2,7 +2,8 @@ use relm4::adw;
 use relm4::adw::prelude::*;
 use relm4::prelude::*;
 
-use super::helpers::qdbus_ausfuehren;
+use super::helpers::{kwriteconfig_ausfuehren, qdbus_ausfuehren};
+use crate::services::config::AppConfig;
 
 pub struct OledCareModel {
     pixel_refresh_aktiv: bool,
@@ -79,10 +80,11 @@ impl Component for OledCareModel {
         _root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
+        let config = AppConfig::load();
         let model = OledCareModel {
-            pixel_refresh_aktiv: false,
-            panel_ausblenden_aktiv: false,
-            transparenz_aktiv: false,
+            pixel_refresh_aktiv: config.oled_care_pixel_refresh,
+            panel_ausblenden_aktiv: config.oled_care_panel_autohide,
+            transparenz_aktiv: config.oled_care_transparenz,
         };
         let widgets = view_output!();
         ComponentParts { model, widgets }
@@ -96,27 +98,20 @@ impl Component for OledCareModel {
                 }
                 self.pixel_refresh_aktiv = aktiv;
 
+                AppConfig::update(|c| c.oled_care_pixel_refresh = aktiv);
+
                 let idle_time = if aktiv { "300" } else { "600" };
                 sender.command(move |out, shutdown| {
                     shutdown
                         .register(async move {
-                            let args = [
-                                "--file",
-                                "powermanagementprofilesrc",
-                                "--group",
-                                "AC",
-                                "--group",
-                                "DPMSControl",
-                                "--key",
-                                "idleTime",
-                                idle_time,
-                            ];
-                            kwriteconfig(
-                                &args,
-                                &out,
-                                OledCareCommandOutput::PixelRefreshGesetzt(aktiv),
-                            )
-                            .await;
+                            match kwriteconfig_ausfuehren(&[
+                                "--file", "powermanagementprofilesrc",
+                                "--group", "AC", "--group", "DPMSControl",
+                                "--key", "idleTime", idle_time,
+                            ]).await {
+                                Ok(()) => out.emit(OledCareCommandOutput::PixelRefreshGesetzt(aktiv)),
+                                Err(e) => out.emit(OledCareCommandOutput::Fehler(e)),
+                            }
                         })
                         .drop_on_shutdown()
                 });
@@ -126,6 +121,8 @@ impl Component for OledCareModel {
                     return;
                 }
                 self.panel_ausblenden_aktiv = aktiv;
+
+                AppConfig::update(|c| c.oled_care_panel_autohide = aktiv);
 
                 let hiding = if aktiv { "autohide" } else { "none" };
                 let script = format!("panels().forEach(function(p){{p.hiding='{}';}})", hiding);
@@ -147,6 +144,8 @@ impl Component for OledCareModel {
                     return;
                 }
                 self.transparenz_aktiv = aktiv;
+
+                AppConfig::update(|c| c.oled_care_transparenz = aktiv);
 
                 let opacity = if aktiv { "transparent" } else { "opaque" };
                 let script = format!("panels().forEach(function(p){{p.opacity='{}';}})", opacity);
@@ -216,39 +215,3 @@ async fn plasmashell_evaluate(
     }
 }
 
-/// Führt kwriteconfig6 mit den gegebenen Argumenten aus.
-async fn kwriteconfig(
-    args: &[&str],
-    out: &relm4::Sender<OledCareCommandOutput>,
-    erfolg: OledCareCommandOutput,
-) {
-    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
-    let result = tokio::task::spawn_blocking(move || {
-        std::process::Command::new("kwriteconfig6")
-            .args(&args)
-            .status()
-    })
-    .await;
-
-    match result {
-        Ok(Ok(status)) if status.success() => {
-            out.emit(erfolg);
-        }
-        Ok(Ok(status)) => {
-            out.emit(OledCareCommandOutput::Fehler(format!(
-                "kwriteconfig6 fehlgeschlagen mit Exit-Code: {}",
-                status.code().unwrap_or(-1)
-            )));
-        }
-        Ok(Err(e)) => {
-            out.emit(OledCareCommandOutput::Fehler(format!(
-                "kwriteconfig6 starten fehlgeschlagen: {e}"
-            )));
-        }
-        Err(e) => {
-            out.emit(OledCareCommandOutput::Fehler(format!(
-                "spawn_blocking fehlgeschlagen: {e}"
-            )));
-        }
-    }
-}

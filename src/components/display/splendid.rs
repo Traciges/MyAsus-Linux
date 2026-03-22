@@ -3,11 +3,12 @@ use relm4::adw;
 use relm4::adw::prelude::*;
 use relm4::prelude::*;
 
-use super::helpers::qdbus_ausfuehren;
+use super::helpers::{kwriteconfig_ausfuehren, qdbus_ausfuehren};
+use crate::services::config::AppConfig;
 
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum SplendidProfil {
+    #[default]
     Normal,
     Lebendig,
     Manuell,
@@ -15,7 +16,6 @@ pub enum SplendidProfil {
     EReading,
 }
 
-#[allow(dead_code)]
 pub struct SplendidModel {
     aktuelles_profil: SplendidProfil,
     farbtemperatur: f64,
@@ -29,7 +29,6 @@ pub struct SplendidModel {
     scale_eye_care: gtk::Scale,
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub enum SplendidMsg {
     ProfilWechseln(SplendidProfil),
@@ -37,7 +36,6 @@ pub enum SplendidMsg {
     EyeCareStaerkeGeaendert(f64),
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub enum SplendidCommandOutput {
     EyeCareGesetzt(bool),
@@ -142,7 +140,6 @@ impl Component for SplendidModel {
         scale_farbtemperatur.set_hexpand(true);
         scale_farbtemperatur.set_width_request(300);
         scale_farbtemperatur.set_valign(gtk::Align::Center);
-        scale_farbtemperatur.set_value(4500.0);
 
         let scale_eye_care = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
         scale_eye_care.set_hexpand(true);
@@ -162,10 +159,25 @@ impl Component for SplendidModel {
             });
         }
 
+        // Gespeicherten Zustand wiederherstellen
+        let config = AppConfig::load();
+        let gespeichertes_profil = config.splendid_profil;
+
+        scale_farbtemperatur.set_value(config.farbtemperatur);
+        scale_eye_care.set_value(config.eye_care_staerke);
+
+        match gespeichertes_profil {
+            SplendidProfil::Normal => {}
+            SplendidProfil::Lebendig => check_lebendig.set_active(true),
+            SplendidProfil::Manuell => check_manuell.set_active(true),
+            SplendidProfil::EyeCare => check_eye_care.set_active(true),
+            SplendidProfil::EReading => check_e_reading.set_active(true),
+        }
+
         let model = SplendidModel {
-            aktuelles_profil: SplendidProfil::Normal,
-            farbtemperatur: 4500.0,
-            eye_care_staerke: 0.0,
+            aktuelles_profil: gespeichertes_profil,
+            farbtemperatur: config.farbtemperatur,
+            eye_care_staerke: config.eye_care_staerke,
             check_normal,
             check_lebendig,
             check_manuell,
@@ -187,6 +199,8 @@ impl Component for SplendidModel {
                 }
                 let vorheriges = self.aktuelles_profil;
                 self.aktuelles_profil = profil;
+
+                AppConfig::update(|c| c.splendid_profil = profil);
 
                 // Night Color deaktivieren, wenn wir Eye Care verlassen
                 if vorheriges == SplendidProfil::EyeCare && profil != SplendidProfil::EyeCare {
@@ -231,6 +245,9 @@ impl Component for SplendidModel {
             }
             SplendidMsg::FarbtemperaturGeaendert(wert) => {
                 self.farbtemperatur = wert;
+
+                AppConfig::update(|c| c.farbtemperatur = wert);
+
                 let kelvin = wert as u32;
 
                 sender.command(move |out, shutdown| {
@@ -243,6 +260,9 @@ impl Component for SplendidModel {
             }
             SplendidMsg::EyeCareStaerkeGeaendert(wert) => {
                 self.eye_care_staerke = wert;
+
+                AppConfig::update(|c| c.eye_care_staerke = wert);
+
                 eprintln!("Eye Care Stärke auf {} gesetzt", wert);
             }
         }
@@ -271,83 +291,38 @@ impl Component for SplendidModel {
     }
 }
 
-#[allow(dead_code)]
 /// Setzt die Farbtemperatur über kwriteconfig6 und toggelt Night Color zum Neuladen.
 async fn farbtemperatur_setzen(kelvin: u32, out: &relm4::Sender<SplendidCommandOutput>) {
     let kelvin_str = kelvin.to_string();
-
-    // Schritt 1: Farbtemperatur in kwinrc schreiben
-    let args_kelvin = kelvin_str.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        std::process::Command::new("kwriteconfig6")
-            .args([
-                "--file",
-                "kwinrc",
-                "--group",
-                "NightColor",
-                "--key",
-                "NightTemperature",
-                &args_kelvin,
-            ])
-            .status()
-    })
-    .await;
-
-    match result {
-        Ok(Ok(status)) if status.success() => {}
-        Ok(Ok(status)) => {
-            out.emit(SplendidCommandOutput::Fehler(format!(
-                "kwriteconfig6 NightTemperature fehlgeschlagen mit Exit-Code: {}",
-                status.code().unwrap_or(-1)
-            )));
-            return;
-        }
-        Ok(Err(e)) => {
-            out.emit(SplendidCommandOutput::Fehler(format!(
-                "kwriteconfig6 starten fehlgeschlagen: {e}"
-            )));
-            return;
-        }
-        Err(e) => {
-            out.emit(SplendidCommandOutput::Fehler(format!(
-                "spawn_blocking fehlgeschlagen: {e}"
-            )));
-            return;
-        }
+    if let Err(e) = kwriteconfig_ausfuehren(&[
+        "--file", "kwinrc", "--group", "NightColor", "--key", "NightTemperature", &kelvin_str,
+    ]).await {
+        out.emit(SplendidCommandOutput::Fehler(e));
+        return;
     }
-
-    // Schritt 2: Night Color kurz deaktivieren und wieder aktivieren, um die neue Temperatur zu laden
-    night_color_toggle(false, out).await;
-    night_color_toggle(true, out).await;
-
+    kwin_reconfigure(out).await;
     out.emit(SplendidCommandOutput::FarbtemperaturGesetzt(kelvin));
 }
 
-#[allow(dead_code)]
-/// Setzt Night Color an/aus via qdbus (für Eye Care).
+/// Setzt Night Color an/aus via kwriteconfig6 + KWin reconfigure (KDE Plasma 6 Wayland).
 async fn night_color_setzen(aktiv: bool, out: &relm4::Sender<SplendidCommandOutput>) {
     let wert = if aktiv { "true" } else { "false" };
-    let args = vec![
-        "org.kde.KWin".to_string(),
-        "/ColorCorrect".to_string(),
-        "org.kde.kwin.ColorCorrect.nightColorEnabled".to_string(),
-        wert.to_string(),
-    ];
-    match qdbus_ausfuehren(args).await {
-        Ok(()) => out.emit(SplendidCommandOutput::EyeCareGesetzt(aktiv)),
-        Err(e) => out.emit(SplendidCommandOutput::Fehler(e)),
+    if let Err(e) = kwriteconfig_ausfuehren(&[
+        "--file", "kwinrc", "--group", "NightColor", "--key", "Active", wert,
+    ]).await {
+        out.emit(SplendidCommandOutput::Fehler(e));
+        return;
     }
+    kwin_reconfigure(out).await;
+    out.emit(SplendidCommandOutput::EyeCareGesetzt(aktiv));
 }
 
-#[allow(dead_code)]
-/// Interne Hilfsfunktion: Night Color toggle ohne Erfolgs-Emit (für Farbtemperatur-Reload).
-async fn night_color_toggle(aktiv: bool, out: &relm4::Sender<SplendidCommandOutput>) {
-    let wert = if aktiv { "true" } else { "false" };
+/// Sendet org.kde.KWin.reconfigure, damit kwinrc-Änderungen sofort wirksam werden.
+async fn kwin_reconfigure(out: &relm4::Sender<SplendidCommandOutput>) {
     let args = vec![
         "org.kde.KWin".to_string(),
-        "/ColorCorrect".to_string(),
-        "org.kde.kwin.ColorCorrect.nightColorEnabled".to_string(),
-        wert.to_string(),
+        "/KWin".to_string(),
+        "org.kde.KWin.reconfigure".to_string(),
     ];
     if let Err(e) = qdbus_ausfuehren(args).await {
         out.emit(SplendidCommandOutput::Fehler(e));

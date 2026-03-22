@@ -1,5 +1,6 @@
 mod backend;
 mod components;
+mod services;
 
 use components::battery::BatteryModel;
 use components::display::OledCareModel;

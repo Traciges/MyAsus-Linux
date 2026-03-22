@@ -5,6 +5,7 @@ use relm4::prelude::*;
 
 use crate::backend::dbus;
 use crate::backend::dbus::FanProfile;
+use crate::services::config::AppConfig;
 
 pub struct FanModel {
     aktuelles_profil: FanProfile,
@@ -167,6 +168,8 @@ impl Component for FanModel {
                     return;
                 }
                 self.tiefschlaf_aktiv = aktiv;
+
+                AppConfig::update(|c| c.fan_tiefschlaf_aktiv = aktiv);
 
                 let wert = if aktiv { "deep" } else { "s2idle" };
                 sender.command(move |out, shutdown| {
