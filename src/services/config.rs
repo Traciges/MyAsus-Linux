@@ -6,8 +6,6 @@ use std::fs;
 #[derive(Serialize, Deserialize, Clone)]
 pub struct AppConfig {
     pub splendid_profil: SplendidProfil,
-    pub farbtemperatur: f64,
-    pub eye_care_staerke: f64,
     pub oled_care_pixel_refresh: bool,
     pub oled_care_panel_autohide: bool,
     pub oled_care_transparenz: bool,
@@ -17,9 +15,7 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            splendid_profil: SplendidProfil::Normal,
-            farbtemperatur: 4500.0,
-            eye_care_staerke: 50.0,
+            splendid_profil: SplendidProfil::default(),
             oled_care_pixel_refresh: false,
             oled_care_panel_autohide: false,
             oled_care_transparenz: false,
@@ -29,12 +25,12 @@ impl Default for AppConfig {
 }
 
 impl AppConfig {
-    fn config_path() -> Option<std::path::PathBuf> {
-        ProjectDirs::from("", "", "myasus-linux").map(|dirs| dirs.config_dir().join("config.json"))
+    pub fn config_dir() -> Option<std::path::PathBuf> {
+        ProjectDirs::from("", "", "myasus-linux").map(|dirs| dirs.config_dir().to_path_buf())
     }
 
-    pub fn icc_verzeichnis() -> Option<std::path::PathBuf> {
-        ProjectDirs::from("", "", "myasus-linux").map(|dirs| dirs.config_dir().join("icc"))
+    fn config_path() -> Option<std::path::PathBuf> {
+        Self::config_dir().map(|dir| dir.join("config.json"))
     }
 
     pub fn load() -> Self {

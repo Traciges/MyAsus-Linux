@@ -1,22 +1,42 @@
 use crate::services::config::AppConfig;
 
-/// Wendet ein ICC-Profil via kscreen-doctor auf eDP-1 an.
-pub(crate) async fn icc_profil_anwenden(dateiname: &str) -> Result<(), String> {
-    let verzeichnis = AppConfig::icc_verzeichnis()
-        .ok_or_else(|| "Konnte ICC-Verzeichnis nicht bestimmen".to_string())?;
+const VIVID_ICM: &[u8] = include_bytes!("../../../assets/icc/vivid.icm");
+const VIVID_MOVIE_ICM: &[u8] = include_bytes!("../../../assets/icc/vivid-movie.icm");
+const DIMMED_ICM: &[u8] = include_bytes!("../../../assets/icc/dimmed.icm");
 
-    let _ = std::fs::create_dir_all(&verzeichnis);
+pub(crate) async fn setup_icc_profiles() -> Result<std::path::PathBuf, String> {
+    let basis = AppConfig::config_dir()
+        .ok_or_else(|| "Konnte Config-Verzeichnis nicht bestimmen".to_string())?
+        .join("icc");
 
-    let pfad = verzeichnis.join(dateiname);
-    if !pfad.exists() {
-        return Err(format!(
-            "Profildatei '{}' nicht gefunden. Bitte kopiere deine ASUS .icc Datei nach {}",
-            dateiname,
-            verzeichnis.display()
-        ));
-    }
+    let basis_clone = basis.clone();
+    tokio::task::spawn_blocking(move || {
+        std::fs::create_dir_all(&basis_clone)
+            .map_err(|e| format!("ICC-Verzeichnis erstellen fehlgeschlagen: {e}"))?;
 
-    let arg = format!("output.eDP-1.profile.\"{}\"", pfad.display());
+        for (name, data) in [
+            ("vivid.icm", VIVID_ICM),
+            ("vivid-movie.icm", VIVID_MOVIE_ICM),
+            ("dimmed.icm", DIMMED_ICM),
+        ] {
+            std::fs::write(basis_clone.join(name), data)
+                .map_err(|e| format!("ICC-Profil '{name}' schreiben fehlgeschlagen: {e}"))?;
+        }
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking fehlgeschlagen: {e}"))??;
+
+    Ok(basis)
+}
+
+pub(crate) async fn icc_profil_anwenden(
+    dateiname: &str,
+    basis_pfad: &std::path::Path,
+) -> Result<(), String> {
+    let absoluter_pfad = basis_pfad.join(dateiname);
+    let arg = format!("output.eDP-1.iccprofile.{}", absoluter_pfad.display());
+
     let result = tokio::task::spawn_blocking(move || {
         std::process::Command::new("kscreen-doctor")
             .arg(&arg)
@@ -35,28 +55,7 @@ pub(crate) async fn icc_profil_anwenden(dateiname: &str) -> Result<(), String> {
     }
 }
 
-/// Setzt das ICC-Profil auf eDP-1 zurück.
-pub(crate) async fn icc_profil_zuruecksetzen() -> Result<(), String> {
-    let result = tokio::task::spawn_blocking(move || {
-        std::process::Command::new("kscreen-doctor")
-            .arg("output.eDP-1.profile.")
-            .status()
-    })
-    .await;
-
-    match result {
-        Ok(Ok(status)) if status.success() => Ok(()),
-        Ok(Ok(status)) => Err(format!(
-            "kscreen-doctor fehlgeschlagen mit Exit-Code: {}",
-            status.code().unwrap_or(-1)
-        )),
-        Ok(Err(e)) => Err(format!("kscreen-doctor starten fehlgeschlagen: {e}")),
-        Err(e) => Err(format!("spawn_blocking fehlgeschlagen: {e}")),
-    }
-}
-
-/// Führt qdbus-qt6 mit Fallback auf qdbus aus.
-/// Gibt Ok(()) oder Err(String) zurück.
+/// Fallback: versucht qdbus-qt6, dann qdbus.
 pub(crate) async fn qdbus_ausfuehren(args: Vec<String>) -> Result<(), String> {
     let result = tokio::task::spawn_blocking(move || {
         let status = std::process::Command::new("qdbus-qt6").args(&args).status();
@@ -85,8 +84,6 @@ pub(crate) async fn qdbus_ausfuehren(args: Vec<String>) -> Result<(), String> {
     }
 }
 
-/// Führt kwriteconfig6 mit den gegebenen Argumenten aus.
-/// Gibt Ok(()) oder Err(String) zurück.
 pub(crate) async fn kwriteconfig_ausfuehren(args: &[&str]) -> Result<(), String> {
     let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
     let result = tokio::task::spawn_blocking(move || {
