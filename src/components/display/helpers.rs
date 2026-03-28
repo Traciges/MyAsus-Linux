@@ -1,26 +1,26 @@
 use crate::services::config::AppConfig;
 
-const VIVID_ICM: &[u8] = include_bytes!("../../../assets/icc/vivid.icm");
-const VIVID_MOVIE_ICM: &[u8] = include_bytes!("../../../assets/icc/vivid-movie.icm");
-const DIMMED_ICM: &[u8] = include_bytes!("../../../assets/icc/dimmed.icm");
+const SRGB_ICM: &[u8] = include_bytes!("../../../assets/icm/ASUS_sRGB.icm");
+const DCIP3_ICM: &[u8] = include_bytes!("../../../assets/icm/ASUS_DCIP3.icm");
+const DISPLAYP3_ICM: &[u8] = include_bytes!("../../../assets/icm/ASUS_DisplayP3.icm");
 
-pub(crate) async fn setup_icc_profiles() -> Result<std::path::PathBuf, String> {
+pub(crate) async fn setup_icm_profiles() -> Result<std::path::PathBuf, String> {
     let basis = AppConfig::config_dir()
         .ok_or_else(|| "Konnte Config-Verzeichnis nicht bestimmen".to_string())?
-        .join("icc");
+        .join("icm");
 
     let basis_clone = basis.clone();
     tokio::task::spawn_blocking(move || {
         std::fs::create_dir_all(&basis_clone)
-            .map_err(|e| format!("ICC-Verzeichnis erstellen fehlgeschlagen: {e}"))?;
+            .map_err(|e| format!("ICM-Verzeichnis erstellen fehlgeschlagen: {e}"))?;
 
         for (name, data) in [
-            ("vivid.icm", VIVID_ICM),
-            ("vivid-movie.icm", VIVID_MOVIE_ICM),
-            ("dimmed.icm", DIMMED_ICM),
+            ("ASUS_sRGB.icm", SRGB_ICM),
+            ("ASUS_DCIP3.icm", DCIP3_ICM),
+            ("ASUS_DisplayP3.icm", DISPLAYP3_ICM),
         ] {
             std::fs::write(basis_clone.join(name), data)
-                .map_err(|e| format!("ICC-Profil '{name}' schreiben fehlgeschlagen: {e}"))?;
+                .map_err(|e| format!("ICM-Profil '{name}' schreiben fehlgeschlagen: {e}"))?;
         }
         Ok::<(), String>(())
     })
@@ -30,7 +30,26 @@ pub(crate) async fn setup_icc_profiles() -> Result<std::path::PathBuf, String> {
     Ok(basis)
 }
 
-pub(crate) async fn icc_profil_anwenden(
+pub(crate) async fn icm_profil_reset() -> Result<(), String> {
+    let result = tokio::task::spawn_blocking(|| {
+        std::process::Command::new("kscreen-doctor")
+            .arg("output.eDP-1.profile.reset")
+            .status()
+    })
+    .await;
+
+    match result {
+        Ok(Ok(status)) if status.success() => Ok(()),
+        Ok(Ok(status)) => Err(format!(
+            "kscreen-doctor profile.reset fehlgeschlagen mit Exit-Code: {}",
+            status.code().unwrap_or(-1)
+        )),
+        Ok(Err(e)) => Err(format!("kscreen-doctor starten fehlgeschlagen: {e}")),
+        Err(e) => Err(format!("spawn_blocking fehlgeschlagen: {e}")),
+    }
+}
+
+pub(crate) async fn icm_profil_anwenden(
     dateiname: &str,
     basis_pfad: &std::path::Path,
 ) -> Result<(), String> {

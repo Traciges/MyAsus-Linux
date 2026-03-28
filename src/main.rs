@@ -3,8 +3,9 @@ mod components;
 mod services;
 
 use components::battery::BatteryModel;
+use components::display::FarbskalaModel;
 use components::display::OledCareModel;
-use components::display::SplendidModel;
+use components::display::ZielmodusModel;
 use components::fan::FanModel;
 use relm4::adw;
 use relm4::adw::prelude::*;
@@ -14,7 +15,8 @@ struct AppModel {
     battery: Controller<BatteryModel>,
     fan: Controller<FanModel>,
     oled_care: Controller<OledCareModel>,
-    splendid: Controller<SplendidModel>,
+    farbskala: Controller<FarbskalaModel>,
+    zielmodus: Controller<ZielmodusModel>,
 }
 
 #[relm4::component]
@@ -41,7 +43,9 @@ impl SimpleComponent for AppModel {
                     #[local_ref]
                     add = oled_care_widget -> adw::PreferencesGroup {},
                     #[local_ref]
-                    add = splendid_widget -> adw::PreferencesGroup {},
+                    add = farbskala_widget -> adw::PreferencesGroup {},
+                    #[local_ref]
+                    add = zielmodus_widget -> adw::PreferencesGroup {},
                 },
             }
         }
@@ -55,18 +59,21 @@ impl SimpleComponent for AppModel {
         let battery = BatteryModel::builder().launch(()).detach();
         let fan = FanModel::builder().launch(()).detach();
         let oled_care = OledCareModel::builder().launch(()).detach();
-        let splendid = SplendidModel::builder().launch(()).detach();
+        let farbskala = FarbskalaModel::builder().launch(()).detach();
+        let zielmodus = ZielmodusModel::builder().launch(()).detach();
 
         let model = AppModel {
             battery,
             fan,
             oled_care,
-            splendid,
+            farbskala,
+            zielmodus,
         };
         let battery_widget = model.battery.widget();
         let fan_widget = model.fan.widget();
         let oled_care_widget = model.oled_care.widget();
-        let splendid_widget = model.splendid.widget();
+        let farbskala_widget = model.farbskala.widget();
+        let zielmodus_widget = model.zielmodus.widget();
         let widgets = view_output!();
         ComponentParts { model, widgets }
     }
